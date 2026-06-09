@@ -963,6 +963,7 @@
 // COLE TODO ESTE CÓDIGO NO APPS SCRIPT E REIMPLANTE
 // =====================================================
 const SHEET_NAME = "BENFEITORIAS MCM";
+const COL_APROVADO = 9; // coluna I = APROVADO
 
 function doGet(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -977,6 +978,12 @@ function doGet(e) {
       headerIdx = i; break;
     }
   }
+
+  // Garante que o cabeçalho APROVADO existe na coluna I
+  if (!data[headerIdx][COL_APROVADO - 1] || data[headerIdx][COL_APROVADO - 1] === '') {
+    sheet.getRange(headerIdx + 1, COL_APROVADO).setValue('APROVADO');
+  }
+
   const headers = data[headerIdx];
   const rows = [];
   for (let i = headerIdx + 1; i < data.length; i++) {
@@ -984,7 +991,6 @@ function doGet(e) {
     const obj = {};
     headers.forEach((h, j) => {
       const v = data[i][j];
-      // Formata datas e números como string legível
       if (v instanceof Date) {
         const mm = String(v.getMonth()+1).padStart(2,'0');
         const yyyy = v.getFullYear();
@@ -996,6 +1002,7 @@ function doGet(e) {
       }
     });
     obj._row = i + 1;
+    obj._aprovado = String(data[i][COL_APROVADO - 1]).toUpperCase() === 'SIM';
     rows.push(obj);
   }
 
@@ -1013,10 +1020,14 @@ function doPost(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.getSheets()[0];
-  
-  // Aceita tanto application/json quanto text/plain
   const raw = e.postData ? e.postData.contents : '{}';
   const payload = JSON.parse(raw);
+
+  if (payload.action === "aprovado" && payload._row) {
+    sheet.getRange(payload._row, COL_APROVADO).setValue(payload.valor ? 'SIM' : '');
+    return ContentService.createTextOutput(JSON.stringify({status:"ok"}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   if (payload.action === "update") {
     const row = payload._row;
     sheet.getRange(row, 1).setValue(payload.CASA || "");
@@ -1363,17 +1374,32 @@ function salvarAprovados() {
   localStorage.setItem('aprovados', JSON.stringify([...aprovados]));
 }
 
+// Sincroniza aprovado na planilha (quando Apps Script configurado)
+function syncAprovadoSheets(item, valor) {
+  if (!sheetsUrl || !item._row) return;
+  fetch(sheetsUrl, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ action: 'aprovado', _row: item._row, valor })
+  }).catch(e => console.warn('Sync aprovado falhou:', e));
+}
+
 function toggleAprovado(filteredIdx) {
   const item = filteredData[filteredIdx];
   const key = itemKey(item);
-  if (aprovados.has(key)) {
-    aprovados.delete(key);
-    showToast('Aprovação removida', 'success');
-  } else {
+  const novoValor = !aprovados.has(key);
+  if (novoValor) {
     aprovados.add(key);
+    item._aprovado = true;
     showToast('✅ Item marcado como Aprovado!', 'success');
+  } else {
+    aprovados.delete(key);
+    item._aprovado = false;
+    showToast('Aprovação removida', 'success');
   }
   salvarAprovados();
+  syncAprovadoSheets(item, novoValor);
   renderBannerAprovados();
   renderTable();
   renderCards();
@@ -1381,7 +1407,13 @@ function toggleAprovado(filteredIdx) {
 
 function limparTodosAprovados() {
   if (!confirm('Remover todos os itens aprovados?')) return;
+  // Sincroniza remoção de cada um na planilha
+  [...aprovados].forEach(key => {
+    const item = allData.find(d => itemKey(d) === key);
+    if (item) syncAprovadoSheets(item, false);
+  });
   aprovados.clear();
+  allData.forEach(d => d._aprovado = false);
   salvarAprovados();
   updateAprovadosSidebar();
   applyFilters();
@@ -1594,12 +1626,18 @@ function loadFromSheets() {
           return s;
         })(),
         prio:   g('Prioridade'),
-        _row:   row._row || null
+        _row:   row._row || null,
+        _aprovado: row._aprovado === true
       };
     }).filter(r => r.casa || r.obs);
 
+    // Sincroniza aprovados da planilha com o Set local
+    aprovados = new Set(allData.filter(d => d._aprovado).map(d => itemKey(d)));
+    salvarAprovados();
+
     buildSidebar();
     applyFilters();
+    updateAprovadosSidebar();
     document.getElementById('syncLabel').textContent = 'Sheets ✓ ' + new Date().toLocaleTimeString('pt-BR');
     showToast(`✅ ${allData.length} itens carregados do Sheets!`, 'success');
   };
