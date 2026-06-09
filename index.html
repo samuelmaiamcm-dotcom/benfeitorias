@@ -938,9 +938,10 @@
       <h3>🔗 URL do Apps Script (Web App)</h3>
       <p>Cole aqui a URL do seu Google Apps Script após seguir os passos abaixo:</p>
       <input class="form-input" id="sheetsUrl" placeholder="https://script.google.com/macros/s/XXXX/exec" style="margin-bottom:8px">
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn" onclick="saveConfig()">Salvar e Conectar</button>
         <button class="btn btn-outline" onclick="testConnection()">Testar Conexão</button>
+        <button class="btn btn-outline" onclick="copiarLinkCompartilhavel()" title="Gera um link que já carrega a URL em qualquer dispositivo">🔗 Copiar link p/ outros dispositivos</button>
       </div>
     </div>
 
@@ -1074,7 +1075,11 @@ let selectedItems = new Set(); // guarda _row (string) de cada item selecionado
 let filteredData = [...allData];
 let activeFilters = { casa: [], dept: [], status: [], prio: [] };
 let currentView = 'table';
-let sheetsUrl = localStorage.getItem('sheetsUrl') || 'https://script.google.com/macros/s/AKfycbwDx-xUrq0X_GEp8wb_NGORDoNL4YNYgE8lbCBc_h2gdorioKgcvmThzdZ6bxgmtLfp/exec';
+// URL do Apps Script — lê nesta ordem: URL param > localStorage > padrão embutido
+const SCRIPT_URL_PADRAO = 'https://script.google.com/macros/s/AKfycbwDx-xUrq0X_GEp8wb_NGORDoNL4YNYgE8lbCBc_h2gdorioKgcvmThzdZ6bxgmtLfp/exec';
+const urlParam = new URLSearchParams(window.location.search).get('url') || new URLSearchParams(window.location.hash.replace('#','?')).get('url');
+let sheetsUrl = urlParam || localStorage.getItem('sheetsUrl') || SCRIPT_URL_PADRAO;
+if (urlParam) localStorage.setItem('sheetsUrl', urlParam); // salva se veio por param
 if(sheetsUrl) document.getElementById('sheetsUrl').value = sheetsUrl;
 
 // Atualiza só as contagens da sidebar sem reconstruir tudo
@@ -1679,7 +1684,18 @@ function testConnection() {
   loadFromSheets();
 }
 
-// ========== CONFIG MODAL ==========
+function copiarLinkCompartilhavel() {
+  const url = document.getElementById('sheetsUrl').value.trim() || sheetsUrl;
+  if (!url) { showToast('Configure a URL do Apps Script primeiro', 'error'); return; }
+  const link = window.location.href.split('?')[0] + '?url=' + encodeURIComponent(url);
+  navigator.clipboard.writeText(link).then(() => {
+    showToast('🔗 Link copiado! Cole no navegador de qualquer dispositivo.', 'success');
+  }).catch(() => {
+    prompt('Copie este link:', link);
+  });
+}
+
+
 function openConfig() { document.getElementById('configOverlay').classList.add('open'); }
 function closeConfig() { document.getElementById('configOverlay').classList.remove('open'); }
 
